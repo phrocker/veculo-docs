@@ -386,10 +386,22 @@ overhead.
 - **Tighter per-finding text.** Prompt-tune the agent to write less
   prose per `record_finding`. A finding has fixed schema fields; the
   free-text "content" is the variable.
-- **Parallel tool calls actually batched.** System-prompt principle
-  10 (added 2026-05-11) tells the agent to emit independent
-  `tool_use` blocks in one turn rather than one per turn; trace
-  inspection is pending to confirm it's actually happening at scale.
+- **Parallel tool calls actually batched (reads done; writes still
+  serial).** Trace inspection of the 2026-05-11 run confirms
+  principle 10 (added the same day) is working for **reads** — Row
+  B.1's per-turn tool distribution was `3, 6, 4, 1, 1, 1, 1, 1, 1, 1`
+  (a single turn fired 6 tools in parallel; the first 3 turns
+  consumed 13 of the 20 total tool calls). Row C.1's distribution
+  was `2, 5, 2, 3, 1` — batched throughout. The fast 74.9 s run is
+  fast precisely because it collapses the workload into 5 turns.
+  The remaining gap is **`record_finding` writes**: Row B.1's
+  trailing `1, 1, 1, 1, 1` is the agent emitting 5 findings one
+  per turn. If those 5 had been batched into a single turn, the
+  saving is ~4 round-trips × ~5 s/turn ≈ **20 s shaved on B.1**
+  (109.8 s → ~90 s expected). The fix is a one-line addition to
+  principle 10 telling the agent that batching applies to writes
+  too — `record_finding` calls from a single round of
+  evidence-gathering should be emitted as one batched turn.
 - **Two-tier inference, with caveats.** Routing some calls to Haiku
   4.5 (lower $/token, higher tok/s) could shave output-gen time, but
   switching models mid-conversation invalidates the prompt cache for
@@ -398,6 +410,20 @@ overhead.
   pattern), not inline model-switching. Deferred pending measured
   evidence that further latency reduction is justified — see
   §Limitations.
+- **GPU-resident subgraph working sets for large-graph regimes.**
+  On the 8 600-fragment demo tenant, vector search is ~100–500 ms
+  inside each `run_rag_query` — not the bottleneck. On a
+  million-fragment graph, vector search alone climbs to 2–5 s per
+  query (9–15 s on the critical path across 3 RAG queries). At
+  that scale, cuVS / CAGRA over a session-scoped GPU-resident
+  subgraph delivers 10–50× speedups against the same IVF-PQ index
+  the platform already ships. The substrate-side decision this
+  exposes — whether read dispatches still emit `gate_write`
+  records, or only writes do — is documented in
+  [overview.md → "Where this is heading"](overview.md#where-this-is-heading-gpu-resident-working-sets-for-very-large-graphs).
+  Not on the short-term path because the demo's bottleneck is
+  output-token generation, not retrieval; relevant when the
+  underlying graph crosses ~10⁶ vertices.
 
 ## Acts 2–4: failure injection, forensic replay, repair
 

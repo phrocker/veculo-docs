@@ -137,6 +137,74 @@ nothing is rewritten or hidden by the repair.
   The continuity substrate operates on the agent's _graph dispatch
   trajectory_, not its compute environment.
 
+## Where this is heading: GPU-resident working sets for very large graphs
+
+The 75–110 s wall time on this demo is bound by **LLM output
+generation, not retrieval** — the agent writes ~5 000 output tokens
+per run at ~85 tokens/sec on Sonnet 4.6, which alone accounts for
+roughly 60 % of total latency. Prompt caching already closed the
+prefill cost (uncached input tokens dropped 224 K → ~10 in this run).
+The substrate-side overhead is < 0.1 %. Output generation is the
+floor on the current architecture, not the substrate.
+
+That picture changes as graphs grow. On this demo's 8 600-fragment
+tenant, a `run_rag_query` is ~2–3 s end-to-end and the vector-search
+phase inside it is ~100–500 ms. On a **million-fragment graph**,
+vector search alone climbs to 2–5 s per query; with 3 RAG queries
+per run, that's 9–15 s of vector search on the critical path.
+Retrieval becomes the bottleneck at scale.
+
+The architecturally clean next move is **GPU-accelerated vector search
+(cuVS / CAGRA) over session-scoped subgraph working sets resident in
+GPU memory**:
+
+```
+   persistent graph (RFiles, GCS)
+          │
+    [shoal read fleet — today]
+          │
+   ┌──────┴──────────────────────────────┐
+   │  Session working set (GPU-resident) │
+   │   • subgraph adjacency (CSR)        │
+   │   • embeddings buffer               │
+   │   • cuVS index for vector search    │
+   │   • TTL = session lifetime          │
+   └──────┬──────────────────────────────┘
+          │
+   agentic loop: many tool calls, all served from the working set
+```
+
+Sanity-check on the memory footprint: 100 K vertices × 768-dim ×
+4 bytes ≈ 300 MB of embeddings, fits on any single GPU. A
+million-vertex working set is ~3 GB — also comfortable. cuVS
+benchmarks against the same IVF-PQ index this platform already
+ships show 10–50× speedups over CPU search at the scales where
+retrieval becomes the bottleneck.
+
+The architectural question that decides whether this composes
+cleanly with the PIC substrate: do reads against the working set
+still emit dispatch records? Two viable answers, each with explicit
+tradeoffs:
+
+- **(a)** every read still goes through `gate_write` for full
+  auditability, with a small synchronous overhead per lookup;
+- **(b)** reads are working-set-local; the substrate sees batched
+  read profiles emitted async every N ops, not individual lookups.
+
+Writes go through `gate_write` in both cases — the substrate's
+write-side guarantees stay intact regardless. The choice is whether
+the read-side trajectory is auditable at per-lookup granularity or
+at session-aggregate granularity.
+
+**The smallest spike that produces a real number** is half a day's
+work: take the existing IVF-PQ index, load codebook + posting lists
+into a GPU buffer via cuVS, run the same `run_rag_query` calls from
+this demo against both paths, compare wall time. Doesn't touch the
+substrate. Produces a measured baseline for how much GPU
+acceleration would shift the picture on the workloads where it
+matters — graphs an order of magnitude larger than the one this
+demo runs against.
+
 ## Where to read more
 
 - **[Agentic OS — Demo Methodology and Results](methodology.md)**
