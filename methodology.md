@@ -29,6 +29,10 @@
 >
 > _The rest of this document measures that claim end to end._
 
+For a shorter, operator-facing introduction — what to use this for,
+what's happening during a run, and what the load-bearing failure
+behavior looks like — read [overview.md](overview.md) first.
+
 _Build sessions 2026-05-09 → 2026-05-11. Tenant: `cl-kgun2u`. All
 numbers captured live; no synthetic data in the configurations table.
 Headline run is the 2026-05-11 N=3 measurement after prompt caching,
@@ -592,4 +596,4 @@ The PIC substrate this demo exercises lives in:
 External reviewers and prospective collaborators should treat the
 configurations table as **directional evidence at N=3**, the bug
 list as **load-bearing context**, and the limitations section as
-**what to ask before deploying any of this in production**:
+**what to ask before deploying any of this in production**.
