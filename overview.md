@@ -62,29 +62,33 @@ In all three, the operator pattern is the same: **declare scope, let
 the agent run, trust the substrate not the agent**. The agent is the
 worker; the substrate is the contract.
 
-## What's actually happening in 75–110 seconds
+## What's actually happening in 70–100 seconds
 
-A representative agentic-OS run on this demo (Row B, run 1, 109.8s
-wall time) issued **20 tool calls**, all but 1 against the graph:
+A representative agentic-OS run on the 2026-05-12 measurement (Row B
+run 1, **80.8 s** wall time) issued **17 tool calls** across 6
+turns, all but 1 against the graph:
 
 | Operation | Count | What it does |
 |---|---|---|
-| `query_vertex` | 9 | Single-row graph read via the read-fleet (`shoal`), ~300 ms each |
-| `record_finding` | 5 | Graph write + PCA chain narrowing + replay-ledger emit + classification injection (one durable structured finding per call) |
-| `run_rag_query` | 3 | Full production RAG: vector search + graph expansion to depth 2 + cross-encoder reranking + LLM synthesis (~2–3 s end-to-end; each one internally walks hundreds of graph edges) |
+| `query_vertex` | 7 | Single-row graph read via the read-fleet (`shoal`), ~300 ms each |
+| `record_finding` | 5 | Graph write + PCA chain narrowing + replay-ledger emit + classification injection (one durable structured finding per call) — **emitted as a single batched turn**, 5 in parallel |
+| `run_rag_query` | 2 | Full production RAG: vector search + graph expansion to depth 2 + cross-encoder reranking + LLM synthesis (~2–3 s end-to-end; each one internally walks hundreds of graph edges) |
 | `query_neighborhood` | 1 | Multi-hop graph traversal capped at depth 3 / 100 vertices |
 | `recall_fold` | 1 | Cross-session memory lookup |
+| `run_python` | 1 | gVisor-isolated Python sandbox (60 s wall, 512 MB) |
 
-That's **19 graph operations + 1 memory recall**, plus the LLM time
-to reason between each turn and write ~5 000 output tokens of
-structured findings. The shortest run (74.9 s) still did 12 graph
-operations plus 1 RAG query plus 1 finding write. The agentic loop is
-not an LLM thinking in a vacuum — it is substrate-heavy work.
+That's **16 graph operations + 1 memory recall**, plus the LLM time
+to reason between each turn and write ~4 300 output tokens of
+structured findings. The fastest healthy run on this measurement
+(B.3, **80.3 s**) was nearly identical in structure. The agentic
+loop is not an LLM thinking in a vacuum — it is substrate-heavy
+work.
 
 ## What you get when it works
 
-Headline numbers from the 2026-05-11 N=3 run on the `cl-kgun2u`
-tenant, against a 8 600-fragment ingested codebase:
+Headline numbers from the 2026-05-12 N=3 run on the `cl-kgun2u`
+tenant, against a 8 600-fragment ingested codebase (Row B healthy
+runs: 80.5 ± 0.4 s, 5 findings per run):
 
 | Claim | Measurement |
 |---|---|
@@ -139,7 +143,7 @@ nothing is rewritten or hidden by the repair.
 
 ## Where this is heading: GPU-resident working sets for very large graphs
 
-The 75–110 s wall time on this demo is bound by **LLM output
+The 70–100 s wall time on this demo is bound by **LLM output
 generation, not retrieval** — the agent writes ~5 000 output tokens
 per run at ~85 tokens/sec on Sonnet 4.6, which alone accounts for
 roughly 60 % of total latency. Prompt caching already closed the

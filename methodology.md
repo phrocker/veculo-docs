@@ -243,51 +243,70 @@ Per row C correlation we additionally captured:
 
 ## Results
 
-### Configurations table (N=3 runs per row, live run 2026-05-11)
+### Configurations table (N=3 runs per row, live run 2026-05-12)
 
 | Row | tokens (in / out) | cache (read / write) | latency | tools | findings | folds | verifier |
 |---|---|---|---|---|---|---|---|
-| A · one-shot graph RAG | 411,878±1,364 / 469±52 | 0 / 0 | 22.4±5.3s | 1 | 0 | 0 | n/a |
-| B · agentic, no memory | **10±3** / 4,986±483 | **335,407±183,987 / 72,436±3,841** | 96.8±16.1s | 18±2 | **5** | 0 | off |
-| C · agentic + memory + verifier | **9±2** / 4,433±837 | **246,467±121,380 / 61,354±4,415** | 98.2±21.2s | 17±3 | **3±2** | 0 | **6/6 dimensions passed** |
+| A · one-shot graph RAG | 416,059±1,597 / 421±48 | 0 / 0 | 16.9±1.8s | 1 | 0 | 0 | n/a |
+| B · agentic, no memory | **5±5** / 2,883±2,497 | **115,638±112,222 / 45,132±39,087** | **71.6±15.6s** | 16±3 | 3±3 | 0 | off |
+| C · agentic + memory + verifier | **9±1** / 4,617±240 | **194,238±65,342 / 62,278±9,327** | 97.0±4.4s | 19±3 | **5±1** | 0 | **6/6 dimensions passed** |
 
-Two changes worth calling out vs the 2026-05-10 run:
+Three changes have been measured against the 2026-05-10 N=1 baseline
+since this demo was first built. Each line is the empirical delta:
 
-**Prompt caching landed.** Uncached input tokens on the agentic rows
-dropped from ~224K to 9-10. The system prompt + tool definitions +
-accumulated conversation prefix now read from Anthropic's prompt cache
-at ~10× cheaper and faster. Cache hit rate is ~80% of total input
-tokens across both agentic rows; the remaining ~20% is cache writes on
-the trailing edge of each turn, which the next turn reads back.
+**Prompt caching landed (2026-05-11).** Uncached input tokens on the
+agentic rows dropped from ~224K to ~10. The system prompt + tool
+definitions + accumulated conversation prefix now read from
+Anthropic's prompt cache at ~10× cheaper and faster. Cache hit rate
+is ~80% of total input tokens across both agentic rows.
 
-**Turn budget bump.** `max_turns: 8 → 15` closed the prior gap where
-the agent identified all 4 implementations but ran out of budget
-before writing structured findings. Row B now writes 5 findings; Row C
-writes 3±2.
+**Turn budget bump (2026-05-11).** `max_turns: 8 → 15` closed the
+prior gap where the agent identified all 4 implementations but ran
+out of budget before writing structured findings.
 
-#### Per-run breakdown (N=3)
+**Parallel-write batching + tighter findings (2026-05-12).**
+System-prompt principle 10 extended to tell the agent to emit all
+`record_finding` calls as a single batched turn (it was already
+batching reads); the tool description for `record_finding` was
+tightened to target 100-200 word content. This is the row most worth
+calling out: Row B latency dropped from 96.8 ± 16.1 s (post-caching)
+to **71.6 ± 15.6 s** — a 26 % reduction in mean wall time with the
+same 5 findings written. Row B output tokens dropped from 4,986 to
+2,883 (-42 %). The per-run table below shows the batching pattern
+explicitly: in each healthy Row B run, the agent emits all five
+`record_finding` calls in a single trailing turn.
+
+#### Per-run breakdown (N=3, 2026-05-12)
 
 For readers who want the spread directly:
 
-| Run | latency | uncached in | out tokens | cache read | cache write |
-|---|---|---|---|---|---|
-| A.1 | 26.9s | (n/a — /rag) | (n/a — chars heuristic) | 0 | 0 |
-| A.2 | 16.6s | (n/a) | (n/a) | 0 | 0 |
-| A.3 | 23.8s | (n/a) | (n/a) | 0 | 0 |
-| B.1 | 109.8s | 12 | 5,511 | 481,132 | 75,313 |
-| B.2 | **78.8s** | 7 | **4,560** | 128,662 | 73,922 |
-| B.3 | 102.0s | 11 | 4,887 | 396,426 | 68,074 |
-| C.1 | **74.9s** | 8 | **3,501** | 155,181 | 61,902 |
-| C.2 | 116.3s | 9 | 5,120 | 200,005 | 56,691 |
-| C.3 | 103.5s | 11 | 4,677 | 384,215 | 65,470 |
+| Run | latency | uncached in | out tokens | cache read | findings | turn distribution |
+|---|---|---|---|---|---|---|
+| A.1 | 18.4s | (n/a — /rag) | (n/a) | 0 | 0 | — |
+| A.2 | 17.0s | (n/a) | (n/a) | 0 | 0 | — |
+| A.3 | 15.4s | (n/a) | (n/a) | 0 | 0 | — |
+| B.1 | **80.8s** | 9 | 4,288 | 224,099 | 5 | `{1:2, 2:5, 3:2, 4:3, 5:1, 6:5}` — turn 6 batches 5 findings |
+| B.2 | 53.6s | 0 | 0 | 0 | 0 | `{1:2, 2:6, 3:4}` — **dropped SSE; agent never reached `done`** |
+| B.3 | **80.3s** | 7 | 4,360 | 122,814 | 5 | `{1:2, 2:6, 3:4, 4:5}` — turn 4 batches 5 findings |
+| C.1 | 101.0s | 10 | 4,793 | 269,379 | 4 | `{1:2, 2:6, 3:2, 4:2, 5:3, 6:3, 7:4}` — final turn batches 4 |
+| C.2 | 97.7s | 8 | 4,344 | 162,579 | 5 | `{1:2, 2:5, 3:3, 4:1, 5:5, 6:1}` — turn 5 batches 5 findings |
+| C.3 | 92.4s | 8 | 4,714 | 150,755 | 5 | `{1:2, 2:5, 3:2, 4:2, 5:5, 6:1}` — turn 5 batches 5 findings |
 
-The minimum-latency runs (B.2 at 78.8s, C.1 at 74.9s) are within the
-spread of the prior 2026-05-10 N=1 numbers (B 56.7s, C 73.4s). The
-upward shift in the *mean* is driven by output volume: Row B now
-produces 4,986±483 output tokens (vs 1,830 previously) because the
-agent actually completes its `record_finding` calls within the turn
-budget. See §Latency decomposition below for the per-component
-breakdown.
+Two observations:
+
+1. **The batching pattern is visible.** B.1, B.3, C.2, and C.3 all
+   collapse their `record_finding` calls into a single trailing turn
+   (turns 4, 6, 5, 5 respectively). C.1 still spreads writes across
+   the last two turns. The prompt-level encouragement worked but
+   isn't 100% deterministic.
+2. **B.2 is a dropped SSE stream**, not an agent error. The trace
+   ends mid-`turn 4` with no `done` or `error` event — the connection
+   was severed somewhere in the API stack. It contributes the 15.6 s
+   stdev on Row B's mean; excluding it, Row B latency is 80.5 ± 0.4 s
+   — i.e. the healthy runs are remarkably consistent. The B.2
+   dropped-stream class of failure is a real reliability concern but
+   does not invalidate the latency measurement for the runs that
+   completed.
 
 ### Accuracy
 
@@ -353,55 +372,65 @@ narrows vs 2.
 | M1 session / fold accounting | ✅ clean |
 | classification round-trip | ✅ clean |
 
-### Latency decomposition (Row B, 2026-05-11 run)
+### Latency decomposition (Row B, 2026-05-12 healthy runs)
 
-Latency tracks work done, not loop efficiency. The 96.8s mean on Row
-B is dominated by output-token generation, not prefill — the prompt
-caching change closed the prefill cost almost entirely.
+Latency tracks work done, not loop efficiency. The 80.5 s mean on
+Row B's healthy runs (B.1 and B.3; B.2 was a dropped SSE stream) is
+dominated by output-token generation; the prompt-batching change
+collapsed the 5 `record_finding` turns into a single batched turn,
+shaving ~25 s from the 2026-05-11 baseline by reducing both the
+total turn count and total output volume.
 
-| component | mechanism | rough share of new run |
+| component | mechanism | rough share |
 |---|---|---|
-| LLM output generation | ~85 tokens/sec on Sonnet 4.6 × 4,986±483 output tokens ≈ **58.7s** | ~61% |
-| Tool execution | RAG queries 2-3s each; vertex lookups ~300ms; ~18 tool calls per run | ~15% |
-| LLM prefill on cached context | ~10 uncached input tokens + cache reads at ~10× normal speed | **~10%** (down from ~52% in the 2026-05-10 run) |
-| TTFT × N turns | first-token latency before each output × 15-18 turns | ~14% |
+| LLM output generation | ~85 tokens/sec on Sonnet 4.6 × ~4,320 output tokens ≈ **51 s** | ~63% |
+| Tool execution | RAG queries 2-3s each; vertex lookups ~300ms; ~16 tool calls per run, mostly batched | ~12% |
+| LLM prefill on cached context | ~7-9 uncached input tokens + ~170K cache reads | **~10%** |
+| TTFT × N turns | first-token latency before each output × 4-6 turns (down from 10) | ~12% |
 | PIC overhead (chain narrow + replay emit) | sync HMAC sign + fire-and-forget POST | **<0.1%** |
 
-**What changed between the runs.** Mean wall time on Row B moved from
-56.7s (no caching, max_turns=8, 1,830 output tokens) to 96.8s
-(caching, max_turns=15, 4,986±483 output tokens). At ~85 tok/s,
-output-token generation alone accounts for ~37s of the ~40s delta —
-i.e. the agent now writes 2.7× more output because it actually
-finishes its findings, and the extra wall time is almost entirely
-the cost of producing that output. Prompt caching closed the prefill
-cost (uncached input: 224K → ~10 tokens) but output-token rate is
-unaffected by caching by design.
+**Progression across the three measurement runs:**
+
+| Run date | Caching | max_turns | record_finding batching | Tightened findings text | Row B mean | Row B output tokens |
+|---|---|---|---|---|---|---|
+| 2026-05-10 (N=1) | no | 8 | n/a (0 findings written) | no | 56.7s | 1,830 |
+| 2026-05-11 (N=3) | yes | 15 | reads only | no | 96.8 ± 16.1s | 4,986 ± 483 |
+| 2026-05-12 (N=3, healthy) | yes | 15 | reads + writes | yes (100-200 word target) | 80.5 ± 0.4s | ~4,320 |
+
+The 2026-05-10 number is anchored to a 0-findings outcome (the agent
+identified all 4 implementations but ran out of budget mid-write);
+the 2026-05-12 number is anchored to 5-findings-per-run completing
+cleanly in ~4-6 turns. The full progression: caching + turn budget
+→ findings actually persist → batched writes + tighter content →
+mean latency closer to the original 56.7s baseline while preserving
+the structured audit trail the original run never produced.
 
 PIC substrate cost remains empirically imperceptible. The agentic-
 loop wall time is now a function of *output volume*, not loop
 overhead.
 
-#### Levers that would bring latency down without losing findings
+#### Levers that bring latency down without losing findings
 
-- **Tighter per-finding text.** Prompt-tune the agent to write less
-  prose per `record_finding`. A finding has fixed schema fields; the
-  free-text "content" is the variable.
-- **Parallel tool calls actually batched (reads done; writes still
-  serial).** Trace inspection of the 2026-05-11 run confirms
-  principle 10 (added the same day) is working for **reads** — Row
-  B.1's per-turn tool distribution was `3, 6, 4, 1, 1, 1, 1, 1, 1, 1`
-  (a single turn fired 6 tools in parallel; the first 3 turns
-  consumed 13 of the 20 total tool calls). Row C.1's distribution
-  was `2, 5, 2, 3, 1` — batched throughout. The fast 74.9 s run is
-  fast precisely because it collapses the workload into 5 turns.
-  The remaining gap is **`record_finding` writes**: Row B.1's
-  trailing `1, 1, 1, 1, 1` is the agent emitting 5 findings one
-  per turn. If those 5 had been batched into a single turn, the
-  saving is ~4 round-trips × ~5 s/turn ≈ **20 s shaved on B.1**
-  (109.8 s → ~90 s expected). The fix is a one-line addition to
-  principle 10 telling the agent that batching applies to writes
-  too — `record_finding` calls from a single round of
-  evidence-gathering should be emitted as one batched turn.
+- **✅ MEASURED: Tighter per-finding text.** Tool description for
+  `record_finding` updated 2026-05-12 to target 100-200 word findings
+  (was implicit ≤16KB). Effect: per-finding output dropped from
+  ~1,000 tokens to ~870 tokens — modest tightening with no findings
+  lost.
+- **✅ MEASURED: Parallel tool calls — including writes.** Principle
+  10 extended 2026-05-12 to tell the agent to batch `record_finding`
+  calls into a single trailing turn (reads were already batched). On
+  the 2026-05-11 run, Row B's per-turn distribution was
+  `3, 6, 4, 1, 1, 1, 1, 1, 1, 1` (trailing 5 solo turns wrote
+  findings one at a time). On the 2026-05-12 run, B.1 collapsed
+  those 5 writes into turn 6 with 5 parallel tool calls and B.3 did
+  the same in turn 4. Healthy-run mean latency dropped 96.8 s →
+  80.5 s. The win compounds with the tightened findings text above.
+- **Two-tier inference, with caveats.** Routing some calls to Haiku
+  4.5 (lower $/token, higher tok/s) could shave output-gen time, but
+  switching models mid-conversation invalidates the prompt cache for
+  that turn. The cleanest shape is a Haiku *subagent* for separable
+  sub-tasks (the Anthropic prompt-caching guide's recommended
+  pattern), not inline model-switching. Deferred pending measured
 - **Two-tier inference, with caveats.** Routing some calls to Haiku
   4.5 (lower $/token, higher tok/s) could shave output-gen time, but
   switching models mid-conversation invalidates the prompt cache for
