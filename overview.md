@@ -62,7 +62,7 @@ In all three, the operator pattern is the same: **declare scope, let
 the agent run, trust the substrate not the agent**. The agent is the
 worker; the substrate is the contract.
 
-## What's actually happening in 70–100 seconds
+## What's actually happening in 80–100 seconds
 
 A representative agentic-OS run on the 2026-05-12 measurement (Row B
 run 1, **80.8 s** wall time) issued **17 tool calls** across 6
@@ -143,7 +143,7 @@ nothing is rewritten or hidden by the repair.
 
 ## Where this is heading: GPU-resident working sets for very large graphs
 
-The 70–100 s wall time on this demo is bound by **LLM output
+The 80–100 s wall time on this demo is bound by **LLM output
 generation, not retrieval** — the agent writes ~5 000 output tokens
 per run at ~85 tokens/sec on Sonnet 4.6, which alone accounts for
 roughly 60 % of total latency. Prompt caching already closed the
