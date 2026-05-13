@@ -548,16 +548,30 @@ gap.
   model. Future runs should add a shallow-lookup row to give
   operators a clear deployment guide for which surface answers which
   question, not as a concession but as a routing decision.
-* **Memory dividend not re-tested in this run.** The separate
-  three-phase demo (`agentic_os_demo_memory.py`) measures whether
-  prior-session folds make a follow-up question cheaper. In the
-  2026-05-10 run, that dividend came out **negative** (Phase 2A used
-  20% more tokens than Phase 2B/control) because the agent's fold
-  contained a one-sentence summary, not the dense file content the
-  system prompt asks for. The memory *channel* works (the agent did
-  call `recall_fold` and got the prior fold back); the agent's *use*
-  of the channel needs prompt-tuning. Not re-tested under the
-  2026-05-11 changes — open follow-up.
+* **Memory dividend re-test (2026-05-13).** The separate three-phase
+  demo (`agentic_os_demo_memory.py`) measures whether prior-session
+  folds make a follow-up question cheaper.
+  - **2026-05-10 baseline (pre-M.0):** dividend was **negative** —
+    Phase 2A used 20% more tokens than Phase 2B/control because the
+    agent's fold contained a one-sentence summary, not the dense file
+    content the system prompt asked for.
+  - **M.0 fix applied 2026-05-13:** the `record_fold` tool description
+    + research-agent system prompt principle #8 were rewritten with a
+    two-axis pattern (dense `content` required, `summary` only the
+    retrieval key) modeled on `record_finding`'s tightened prompt.
+  - **2026-05-13 post-M.0 result:** dividend **flipped positive**.
+    Phase 2A saved **650 output tokens (~9%)** vs Phase 2B (6,577 vs
+    7,227). Phase 1 emitted a kilobyte-scale fold (vs the previous
+    one-sentence one); Phase 2A pulled it back via `recall_fold`.
+  - **Caveats (still open):** N=1 trial — variance unknown.
+    `tokens_in` is under-counted by the SSE summary (the script only
+    sums a subset of `message_in` events) so the ~9% number reads off
+    output tokens only. Phase 2A made +5 more tool calls than 2B (one
+    being `recall_fold`); whether the other 4 reflect feature
+    (verification) or noise (offset-cost) needs a multi-trial sweep.
+  - Quote the headline number as **"output-token reduction in a
+    single trial after M.0 prompt tightening"**, not as a magnitude
+    claim, until N≥3 lands.
 * **Two-tier inference deferred.** Routing some tool calls to Haiku
   4.5 and synthesis to Sonnet 4.6 would shave output-gen time on the
   cheaper turns, but switching models mid-conversation invalidates
@@ -642,11 +656,14 @@ The PIC substrate this demo exercises lives in:
   deployment. Veculo's agentic surface complements it for question
   shapes that need multi-hop traversal, temporal composition, or
   audit-grade provenance — it doesn't compete with it.
-* **"Memory makes runs cheaper."** Not re-tested under the 2026-05-11
-  changes; the 2026-05-10 result showed a negative memory dividend
-  driven by fold-content quality. The channel works, the agent uses
-  it; the agent's fold-writing prompt is the bottleneck and is open
-  as a follow-up.
+* **"Memory makes runs cheaper" — partially defended.** A single
+  2026-05-13 trial post-M.0 prompt tightening shows Phase 2A saving
+  650 output tokens (~9%) vs Phase 2B — direction-correct, magnitude
+  unverified. The 2026-05-10 pre-M.0 baseline showed a *negative*
+  dividend driven by fold-content quality; M.0 reversed the sign.
+  Output-only because the script's `tokens_in` counter is
+  under-instrumented. N=1; multi-trial sweep with proper
+  input-token accounting still open.
 
 External reviewers and prospective collaborators should treat the
 configurations table as **directional evidence at N=3**, the bug
